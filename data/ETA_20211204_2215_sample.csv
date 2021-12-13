@@ -1,0 +1,11 @@
+type,version,generated_timestamp,data.co,data.route,data.dir,data.service_type,data.seq,data.dest_tc,data.dest_sc,data.dest_en,data.eta_seq,data.eta,data.rmk_tc,data.rmk_sc,data.rmk_en,data.data_timestamp,data.stop
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,14D,O,2,5,彩虹,彩虹,CHOI HUNG,1,NA,服務只限於星期一至五 (公眾假期除外),服务只限于星期一至五 (公众假期除外),This route only operates on Mondays to Fridays (Except Public Holidays),2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,14H,O,1,8,順利(循環線),顺利(循环线),SHUN LEE (CIRCULAR),1,NA,,,,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,15X,O,1,5,紅磡站,红磡站,HUNG HOM STATION,1,NA,服務只限於星期一至五 (公眾假期除外),服务只限于星期一至五 (公众假期除外),This route only operates on Mondays to Fridays (Except Public Holidays),2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,16,O,1,5,旺角(柏景灣),旺角(柏景湾),MONG KOK (PARK AVENUE),1,2021-12-04T22:14:08+08:00,,,,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,16,O,1,5,旺角(柏景灣),旺角(柏景湾),MONG KOK (PARK AVENUE),2,2021-12-04T22:33:47+08:00,原定班次,原定班次,Scheduled Bus,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,16,O,1,5,旺角(柏景灣),旺角(柏景湾),MONG KOK (PARK AVENUE),3,2021-12-04T22:53:47+08:00,原定班次,原定班次,Scheduled Bus,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,16X,O,1,5,旺角(柏景灣),旺角(柏景湾),MONG KOK (PARK AVENUE),1,NA,服務只限於星期一至五 (公眾假期除外),服务只限于星期一至五 (公众假期除外),This route only operates on Mondays to Fridays (Except Public Holidays),2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,215R,O,1,13,順天,顺天,SHUN TIN,1,NA,,,,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,215X,O,1,5,九龍站,九龙站,KOWLOON STATION,1,2021-12-04T22:28:48+08:00,原定班次,原定班次,Scheduled Bus,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
+StopETA,1.0,2021-12-04T22:15:01+08:00,KMB,215X,O,1,5,九龍站,九龙站,KOWLOON STATION,2,2021-12-04T22:48:48+08:00,原定班次,原定班次,Scheduled Bus,2021-12-04T22:14:41+08:00,5ACB622335DF5AE7
