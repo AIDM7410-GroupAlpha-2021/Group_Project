@@ -1,0 +1,13 @@
+name: shiny
+title: shiny
+username:
+account: aidm7410-groupalpha-2021
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 5309445
+bundleId: 5360044
+url: https://aidm7410-groupalpha-2021.shinyapps.io/shiny/
+when: 1639243862.95984
+lastSyncTime: 1639243862.95984
+asMultiple: FALSE
+asStatic: FALSE

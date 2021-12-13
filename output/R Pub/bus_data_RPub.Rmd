@@ -1,0 +1,549 @@
+---
+title: "AIDM7410 Group Project"
+author: "Group Alpha"
+date: "12/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+                               
+In this group project, we developed code in R to perform the below tasks:                   
+1. Collect KMB estimated time of arrival data from the data.gov.hk and store as CSV          
+2. Prepare the data for analysis                      
+3. Analyze data by using tables and data visualizations                      
+
+In this document, we will show the detail codes of from data extraction to data visualization        
+  
+#### Step 1. Load the required libraries
+```{r libraries, warning=FALSE,message=FALSE}
+library(jsonlite) #for JSON handling
+library(httr) #Get JSON
+library(readr) #for writing and reading CSV with encoding UTF-8
+
+library(magrittr) #for pipe
+library(dplyr) #for dataframe manipulation
+library(tidyr) #for NA handling
+library(lubridate) #for date processing
+library(data.table) #for data processing
+
+library(plotly) #for data visualization
+library(leaflet) #for present data in map
+library(reactable) #for creation of interactive table
+library(htmltools) #for HTML and formatting
+
+```
+
+#### Step 2. Random sampling 120 bus stops to investigate
+In Hong Kong, there are a lot of bus stops which basically it would be resource-wise challenging for us to capture all the data to analyze. In order to find our representative result, we have randomly picked 120 bus stations to study.  
+```{r sampling}
+#Note: As the bus station data provided by KMB would subject to change, below code might not give an exact result as the run we made on 4 Dec 2021. 
+#Get Stop ID via API, prepare for extracting ETA at stop level
+stopList <- GET("https://data.etabus.gov.hk/v1/transport/kmb/stop")
+stopList_UTF8 <- rawToChar(stopList$content)
+Encoding(stopList_UTF8) <- 'UTF-8'
+stopListData <- fromJSON(stopList_UTF8)
+df_stopList <- data.frame(stopListData)
+
+#Set seed for random selection of 120 bus stops
+set.seed(7410)
+#Sampling
+df_stopList_120 <- df_stopList[sample(nrow(df_stopList), 120), ]
+df_stopList_120$data.lat <- as.numeric(df_stopList_120$data.lat)
+df_stopList_120$data.long <- as.numeric(df_stopList_120$data.long)
+
+#Export the 120 sample bus stations info as CSV for transparency to public
+write_csv(df_stopList_120,"../../data/120_Sample_Bus_Stations.csv")
+#A view on 10 rows of sample data for 4 key columns
+head(df_stopList_120[,c(4,5,8,9)], 10)
+
+```
+
+
+#### Step 3. Collect ETA data for the 120 bus stops
+We planned to collect data within a 30 minutes window. For each bus station, data will be collected every 1 minute and it will be repeated for 30 times for the same bus station.  
+      
+Note that the below code is run at       
+1. 2021-12-04 22:15 to 22:45 to collect non rush hour data           
+2. 2021-12-06 18:00 to 18:30 to collect rush hour data        
+              
+The below block of code is put into comment as it can no longer capture the exact result as mentioned above (as those are real time data).   
+
+```{r collectData}
+
+#Below data collection codes are put as comments as they will not be used anymore
+#df_stopETA <- NULL
+#for (i in 1:30){
+#  for (busStop in df_stopList_120$data.stop){
+#    path <- paste0("https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/", busStop)
+#    data.stop <- busStop
+#    stopETA <- GET(path)
+#    stopETA_UTF8 <- rawToChar(stopETA$content)
+#    Encoding(stopETA_UTF8) <- 'UTF-8'
+#    stopETAData <- fromJSON(stopETA_UTF8)
+#    df_stopETA <- rbind(df_stopETA, data.frame(stopETAData, data.stop))
+#    Sys.sleep(0.5)
+#  }
+#}
+
+#Store non rush hour raw data into csv
+#write_csv(df_stopETA,"../../data/ETA_20211204_2215.csv")
+#write_csv(df_stopETA,"../../data/ETA_20211206_1800.csv")
+
+```
+
+
+#### Step 4. Data processing and cleansing
+To find out any delay, we would have to compare ETA snapshot at time point t to that of t-1.       
+The simplest scenario is that, as long as the ETA at time point t is a future time compared to that of t-1, it is a delay.          
+
+However, the situation is not that simple. After the bus arrive and depart, its original ETA will be disappeared and replaced by the next scheduled bus ETA. This simple comparison would result in an incorrectly enlarged delay rate.         
+          
+To avoid this error, we have added a logic to compare the gap between (1) current scheduled bus ETA at time point t compared to 1st scheduled bus ETA at t-1 and (2) ETA at time point t compared to ETA of 2nd schedulded bus at t-1. Please refer to the below codes to understand more. 
+```{r dataProcessing1, warning=FALSE,message=FALSE}
+#4.1 Non rush hr data processing----
+#Read non rush hr data from CSV
+
+ETA_NonRushHr_Raw <- read_csv("../../data/ETA_20211204_2215.csv")
+
+ETA_NonRushHr <- copy(ETA_NonRushHr_Raw) %>%
+  select(-data.rmk_tc, -data.rmk_sc, -data.rmk_en) %>%
+  arrange(data.stop, data.route, data.dir, generated_timestamp, data.eta_seq) %>%
+  spread(data.eta_seq, data.eta) %>%
+  rename(eta_1=`1`, eta_2=`2`, eta_3=`3`) %>%
+  select(data.stop, generated_timestamp, data.route, eta_1:eta_3, data.dir:data.data_timestamp) %>%
+  filter(!is.na(eta_1)) %>%
+  mutate(previous_eta_1 = ifelse(lag(data.stop)==data.stop & lag(data.route)==data.route, lag(eta_1), eta_1)) %>%
+  mutate(previous_eta_2 = ifelse(lag(data.stop)==data.stop & lag(data.route)==data.route, lag(eta_2), eta_2))
+
+#Datetime conversion
+ETA_NonRushHr$generated_timestamp <- as_datetime(ETA_NonRushHr$generated_timestamp, tz='Asia/Taipei')
+ETA_NonRushHr$eta_1 <- as_datetime(ETA_NonRushHr$eta_1, tz='Asia/Taipei')
+ETA_NonRushHr$eta_2 <- as_datetime(ETA_NonRushHr$eta_2, tz='Asia/Taipei')
+ETA_NonRushHr$eta_3 <- as_datetime(ETA_NonRushHr$eta_3, tz='Asia/Taipei')
+ETA_NonRushHr$previous_eta_1 <- as_datetime(ETA_NonRushHr$previous_eta_1, tz='Asia/Taipei')
+ETA_NonRushHr$previous_eta_2 <- as_datetime(ETA_NonRushHr$previous_eta_2, tz='Asia/Taipei')
+
+#Create the delay flag and calculate seconds of delay 
+ETA_NonRushHr <- ETA_NonRushHr %>%
+  mutate(is_delay = ifelse(
+    previous_eta_1>=eta_1, "no delay", ifelse(
+      abs(eta_1-previous_eta_1)>abs(eta_1-previous_eta_2), "no delay", "delay"))) %>%
+  replace_na(list(is_delay = "no delay")) %>%
+  mutate(delay_seconds = ifelse(is_delay=="delay", eta_1 - previous_eta_1, 0)) %>%
+  select(data.stop:eta_3, previous_eta_1, previous_eta_2, is_delay, delay_seconds, data.dir:data.data_timestamp)
+
+save(ETA_NonRushHr, file = "../shiny/ETA_NonRushHr.RData")
+```
+
+```{r result1}
+head(ETA_NonRushHr[,c(4,5,6,9)], 10)
+```
+
+```{r dataProcessing2, warning=FALSE,message=FALSE}
+#4.2 Rush hr data processing----
+ETA_RushHr_Raw <- read_csv("../../data/ETA_20211206_1800.csv")
+
+ETA_RushHr <- copy(ETA_RushHr_Raw) %>%
+  select(-data.rmk_tc, -data.rmk_sc, -data.rmk_en) %>%
+  arrange(data.stop, data.route, data.dir, generated_timestamp, data.eta_seq) %>%
+  spread(data.eta_seq, data.eta) %>%
+  rename(eta_1=`1`, eta_2=`2`, eta_3=`3`) %>%
+  select(data.stop, generated_timestamp, data.route, eta_1:eta_3, data.dir:data.data_timestamp) %>%
+  filter(!is.na(eta_1)) %>%
+  mutate(previous_eta_1 = ifelse(lag(data.stop)==data.stop & lag(data.route)==data.route, lag(eta_1), eta_1)) %>%
+  mutate(previous_eta_2 = ifelse(lag(data.stop)==data.stop & lag(data.route)==data.route, lag(eta_2), eta_2))
+
+#Datetime conversion
+ETA_RushHr$generated_timestamp <- as_datetime(ETA_RushHr$generated_timestamp, tz='Asia/Taipei')
+ETA_RushHr$eta_1 <- as_datetime(ETA_RushHr$eta_1, tz='Asia/Taipei')
+ETA_RushHr$eta_2 <- as_datetime(ETA_RushHr$eta_2, tz='Asia/Taipei')
+ETA_RushHr$eta_3 <- as_datetime(ETA_RushHr$eta_3, tz='Asia/Taipei')
+ETA_RushHr$previous_eta_1 <- as_datetime(ETA_RushHr$previous_eta_1, tz='Asia/Taipei')
+ETA_RushHr$previous_eta_2 <- as_datetime(ETA_RushHr$previous_eta_2, tz='Asia/Taipei')
+
+#Create the delay flag and calculate seconds of delay 
+ETA_RushHr <- ETA_RushHr %>%
+  mutate(is_delay = ifelse(
+    previous_eta_1>=eta_1, "no delay", ifelse(
+      abs(eta_1-previous_eta_1)>abs(eta_1-previous_eta_2), "no delay", "delay"))) %>%
+  replace_na(list(is_delay = "no delay")) %>%
+  mutate(delay_seconds = ifelse(is_delay=="delay", eta_1 - previous_eta_1, 0)) %>%
+  select(data.stop:eta_3, previous_eta_1, previous_eta_2, is_delay, delay_seconds, data.dir:data.data_timestamp)
+
+save(ETA_RushHr, file = "../shiny/ETA_RushHr.RData")
+```
+
+```{r result2, warning=FALSE,message=FALSE}
+head(ETA_RushHr[,c(4,5,6,9)],10)
+```
+
+```{r dataProcessing3}
+#Data for analysis aggregate overall
+ETA_NonRushHr_Summary <- copy(ETA_NonRushHr) %>%
+  summarise(
+    NRH.count = n(), 
+    NRH.frequency_of_delay = sum(is_delay=="delay"), 
+    NRH.percentage_of_delay = round(sum(is_delay=="delay")/n()*100, 1), 
+    NRH.average_delay = round(sum(delay_seconds)/sum(is_delay=="delay"),1), 
+    NRH.maximum_delay = max(delay_seconds))
+
+ETA_RushHr_Summary <- copy(ETA_RushHr) %>%
+  summarise(
+    RH.count = n(), 
+    RH.frequency_of_delay = sum(is_delay=="delay"), 
+    RH.percentage_of_delay = round(sum(is_delay=="delay")/n()*100, 1), 
+    RH.average_delay = round(sum(delay_seconds)/sum(is_delay=="delay"),1), 
+    RH.maximum_delay = max(delay_seconds))
+
+Overall_Summary <- merge(ETA_NonRushHr_Summary, ETA_RushHr_Summary)
+save(Overall_Summary, file="../shiny/Overall_Summary.RData")
+```
+
+```{r result3, warning=FALSE,message=FALSE}
+Overall_Summary
+```
+
+#### Step 5. Data Visualization
+To analyze the data, we adopt the data visualization approaches to drive the analysis.    
+         
+1. Histogram of delay frequency      
+This is for understanding the pattern of delays, aggregated at a bus stop level.
+```{r freq_histogram, warning=FALSE,message=FALSE}
+load("../shiny/ETA_NonRushHr.RData")
+load("../shiny/ETA_RushHr.RData")
+load("../shiny/Station_ETA_Summary.RData")
+load("../shiny/Overall_Summary.RData")
+
+#font styling
+t <- list(
+  family = "News Cycle",
+  size = 11
+  )
+#margin styling
+mrg <- list(l = 50, r = 50,
+            b = 50, t = 50,
+            pad = 20)
+
+NRH.density <- subset(Station_ETA_Summary,NRH.percentage_of_delay>=0)
+RH.density <- subset(Station_ETA_Summary,RH.percentage_of_delay>=0)
+freq_density_chart <- plot_ly(alpha = 0.6) %>%
+  add_histogram(x = RH.density$RH.percentage_of_delay, opacity = 0.9, color = I("tomato"), name = 'rush hour') %>%
+  add_histogram(x = NRH.density$NRH.percentage_of_delay, opacity = 0.9, color = I("wheat"), name = 'non rush hour') %>%
+  layout(title = list(text = "Number of bus stop at different frequency of delay", 
+         xanchor = "left", x=0, y = 0.98),
+         yaxis = list(title = 'Number of bus stop'),
+         xaxis = list(title = '% of delay'),
+         barmode = "overlay", 
+         font = t,
+         margin = mrg,
+         legend = list(x=0.8, y=0.98))  %>% 
+  config(displaylogo = FALSE,
+         modeBarButtonsToRemove = list(
+           'sendDataToCloud',
+           'toImage',
+           'autoScale2d',
+           'resetScale2d',
+           'hoverClosestCartesian',
+           'hoverCompareCartesian', 
+           'zoom2d',
+           'pan2d',
+           'select2d',
+           'lasso2d',
+           'zoomIn2d', 
+           'zoomOut2d'))
+
+freq_density_chart
+
+```
+
+2. Histogram of delay duration      
+This is for understanding the distribution of delays duration, especially intersted in detecting extreme values.
+```{r delay_historgram, warning=FALSE, message=FALSE}
+NRH.density <- subset(ETA_NonRushHr,delay_seconds>0) %>%
+  arrange(desc(delay_seconds))
+RH.density <- subset(ETA_RushHr,delay_seconds>0) %>%
+  arrange(desc(delay_seconds))
+      
+      
+NRH.label <- NRH.density[which.max(NRH.density$delay_seconds),]
+RH.label <- RH.density[which.max(RH.density$delay_seconds),]
+label <- rbind(NRH.label, RH.label)
+      
+      
+freq_density_chart <- plot_ly(alpha = 0.6) %>%
+  add_histogram(x = RH.density$delay_seconds, opacity = 0.9, color = I("tomato"), name = 'rush hour') %>%
+  add_histogram(x = NRH.density$delay_seconds, opacity = 0.9, color = I("wheat"), name = 'non rush hour') %>%
+  layout(title = list(text = "Number of delay observation and corresponding delay duration",
+                      xanchor = "left", x=0, y = 0.98),
+                      yaxis = list(title = 'Number of delay observation'),
+                      xaxis = list(title = 'Delay duration (seconds)'),
+                      barmode = "overlay", 
+                      font = t,
+                      margin = mrg,
+                      legend = list(x=0.83, y=0.87))  %>%
+  add_annotations(x = label$delay_seconds,
+                  y = 1,
+                  text = paste("!",label$delay_seconds),
+                  xref = "x",
+                  yref = "y",
+                  showarrow = TRUE,
+                  arrowhead = 4,
+                  arrowsize = .5,
+                  ax = 20,
+                  ay = -40) %>%
+  config(displaylogo = FALSE,
+         modeBarButtonsToRemove = list(
+           'sendDataToCloud',
+           'toImage',
+           'autoScale2d',
+           'resetScale2d',
+           'hoverClosestCartesian',
+           'hoverCompareCartesian', 
+           'zoom2d',
+           'pan2d',
+           'select2d',
+           'lasso2d',
+           'zoomIn2d', 
+           'zoomOut2d'))
+
+freq_density_chart
+```
+
+3. Top 5 bus stations with most severe delay issues      
+This is for understanding any potential geographical implication on the delay issue. We also analyze by separating rush hour and non rush hour data.
+```{r top5_non_rush, warning=FALSE, message=FALSE}
+delay_freq_top5_NRH <- Station_ETA_Summary %>%
+  arrange(desc(NRH.percentage_of_delay)) %>%
+  head(5)
+          
+NRH_5_BusStop_freq <- plot_ly(
+  y=delay_freq_top5_NRH$data.name_en, 
+  x=delay_freq_top5_NRH$NRH.percentage_of_delay, 
+  type = 'bar', 
+  orientation = 'h',
+  color = I("wheat"),
+  opacity = 0.9) %>%
+  layout(
+    yaxis = list(categoryorder = "total ascending"),
+    font = t,
+    margin = mrg,
+    yaxis = list(title = 'Bus stop'),
+    xaxis = list(title = '% of delay'),
+    title = list(text = "Top 5 bus stops with most frequent delay (non-rush hour)", 
+    xanchor = "left", x=0, y = 0.98)) %>%
+  config(displaylogo = FALSE,
+         modeBarButtonsToRemove = list(
+           'sendDataToCloud',
+           'toImage',
+           'autoScale2d',
+           'resetScale2d',
+           'hoverClosestCartesian',
+           'hoverCompareCartesian', 
+           'zoom2d',
+           'pan2d',
+           'select2d',
+           'lasso2d',
+           'zoomIn2d', 
+           'zoomOut2d'))
+
+NRH_5_BusStop_freq
+```
+
+
+```{r top5_rush, warning=FALSE, message=FALSE}
+delay_freq_top5_RH <- Station_ETA_Summary %>%
+  arrange(desc(RH.percentage_of_delay)) %>%
+  head(5)
+          
+RH_5_BusStop_freq <- plot_ly(
+  y=delay_freq_top5_RH$data.name_en, 
+  x=delay_freq_top5_RH$RH.percentage_of_delay, 
+  type = 'bar', 
+  orientation = 'h',
+  color = I("tomato"),
+  opacity = 0.9) %>%
+  layout(
+    yaxis = list(categoryorder = "total ascending"),
+    font = t,
+    margin = mrg,
+    yaxis = list(title = 'Bus stop'),
+    xaxis = list(title = '% of delay'),
+    title = list(text = "Top 5 bus stops with most frequent delay (rush hour)", 
+                 xanchor = "left", x=0, y = 0.98)) %>%
+  config(displaylogo = FALSE,
+         modeBarButtonsToRemove = list(
+           'sendDataToCloud',
+           'toImage',
+           'autoScale2d',
+           'resetScale2d',
+           'hoverClosestCartesian',
+           'hoverCompareCartesian', 
+           'zoom2d',
+           'pan2d',
+           'select2d',
+           'lasso2d',
+           'zoomIn2d', 
+           'zoomOut2d'
+         ))
+RH_5_BusStop_freq
+
+```
+
+4. Maps showing bus stations delay metrics      
+Further to the above visualizations, we extend the effort further to have a map plot.    
+This would give us an idea any region of Hong Kong is with prominent delay issues.      
+Again, we analyze the rush hour and non rush hour separately.
+```{r map_non_rush, message=FALSE, warning=FALSE}
+addLegendCustom <- function(map, colors, labels, sizes, opacity = 0.5){
+  colorAdditions <- paste0(colors, "; width:", sizes, "px;border-radius: 50%; height:", sizes, "px")
+  labelAdditions <- paste0("<div style='display: inline-block;height: ", sizes, "px;margin-top: 4px;line-height: ", sizes, "px;'>", labels, "</div>")
+  
+  return(addLegend(map, "bottomright", colors = colorAdditions, labels = labelAdditions, opacity = opacity, title = '% of Delay'))
+}
+
+tag.map.title <- tags$style(HTML("
+      .leaflet-control.map-title { 
+        text-align: left;
+        padding-left: 10px; 
+        padding-right: 10px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        background: rgba(255,255,255,0.75);
+        font-weight: bold;
+        font-size: 18px;
+        font-family: News Cycle;
+        }
+      "))
+
+
+title <- tags$div(
+  tag.map.title, HTML("Delay frequency and duration for each bus stop - non-rush hour")
+)  
+
+NRH.map <- subset(Station_ETA_Summary,NRH.percentage_of_delay>=0)
+pal <- colorNumeric(palette = 'Reds', domain = c(0:55))
+leaflet(NRH.map) %>% 
+  addTiles() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addCircleMarkers(lat = ~data.lat, 
+                   lng = ~data.long, 
+                   radius = ~NRH.percentage_of_delay*0.2,
+                   color= ~pal(NRH.average_delay), 
+                   label= lapply(paste0("Bus Station: ", NRH.map$data.name_en, "<br/>",
+                                        "% of Delay: ", NRH.map$NRH.percentage_of_delay, "%<br/>",
+                                        "Average Delay Duration:", NRH.map$NRH.average_delay),htmltools::HTML),
+                   stroke = FALSE,
+                   fillOpacity = 0.5) %>%
+  addLegend("bottomright", pal = pal, values = c(0:55),
+            title = 'Delay duration',
+            labFormat = labelFormat(suffix = " seconds"),
+            opacity = 1
+  )%>%
+  addLegendCustom(colors = c("grey", "grey", "grey"), labels = c("20%", "40%", "60%"), sizes = c(8, 16, 24)) %>%
+  addControl(title, position = "bottomleft", className="map-title")
+
+```
+
+```{r map_rush, message=FALSE, warning=FALSE}
+addLegendCustom <- function(map, colors, labels, sizes, opacity = 0.5){
+  colorAdditions <- paste0(colors, "; width:", sizes, "px;border-radius: 50%; height:", sizes, "px")
+  labelAdditions <- paste0("<div style='display: inline-block;height: ", sizes, "px;margin-top: 4px;line-height: ", sizes, "px;'>", labels, "</div>")
+  
+  return(addLegend(map, "bottomright", colors = colorAdditions, labels = labelAdditions, opacity = opacity, title = '% of Delay'))
+}
+
+tag.map.title <- tags$style(HTML("
+      .leaflet-control.map-title { 
+        text-align: left;
+        padding-left: 10px; 
+        padding-right: 10px; 
+        background: rgba(255,255,255,0.75);
+        font-weight: bold;
+        font-size: 18px;
+        }
+      "))
+
+
+title <- tags$div(
+  tag.map.title, HTML("Delay frequency and duration for each bus stop - rush hour")
+)  
+
+RH.map <- subset(Station_ETA_Summary,RH.percentage_of_delay>=0)
+pal <- colorNumeric(palette = 'Reds', domain = c(0:55))
+leaflet(RH.map) %>% 
+  addTiles() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addCircleMarkers(lat = ~data.lat, 
+                   lng = ~data.long, 
+                   radius = ~RH.percentage_of_delay*0.2,
+                   color= ~pal(RH.average_delay), 
+                   label= lapply(paste0("Bus Station: ", RH.map$data.name_en, "<br/>",
+                                        "% of Delay: ", RH.map$RH.percentage_of_delay, "%<br/>",
+                                        "Average Delay Duration:", RH.map$RH.average_delay),htmltools::HTML),
+                   stroke = FALSE,
+                   fillOpacity = 0.5) %>%
+  addLegend("bottomright", pal = pal, values = c(0:55),
+            title = 'Delay duration',
+            labFormat = labelFormat(suffix = " seconds"),
+            opacity = 1
+  )%>%
+  addLegendCustom(colors = c("grey", "grey", "grey"), labels = c("20%", "40%", "60%"), sizes = c(8, 16, 24)) %>%
+  addControl(title, position = "bottomleft", className="map-title")
+
+
+```
+
+5. A summary table for bus stations      
+Last but not least, we created a table of key delay metrics for each bus station.
+```{r reactable, message=FALSE, warning=FALSE}
+busStop_table <- Station_ETA_Summary %>%
+  select(data.name_en, 
+         NRH.percentage_of_delay,
+         NRH.average_delay,
+         NRH.maximum_delay,
+         RH.percentage_of_delay,
+         RH.average_delay,
+         RH.maximum_delay) %>%
+  reactable(
+    filterable = TRUE,
+    searchable = TRUE,
+    highlight = TRUE,
+    columns = list(
+      data.name_en = colDef(name = "Bus Station"),
+      NRH.percentage_of_delay = colDef(
+        name = "Frequency of Delay (%)",
+        na = "-", 
+        format = colFormat(suffix = "%")),
+      NRH.average_delay = colDef(
+        name = "Average delay duration (seconds)",
+        na = "-", 
+        format = colFormat(suffix = "s")),
+      NRH.maximum_delay = colDef(
+        name = "Maximum delay duration (seconds)",
+        na = "-", 
+        format = colFormat(suffix = "s")),
+      RH.percentage_of_delay = colDef(
+        name = "Frequency of Delay (%)",
+        na = "-", 
+        format = colFormat(suffix = "%")),
+      RH.average_delay = colDef(
+        name = "Average delay duration (seconds)",
+        na = "-", 
+        format = colFormat(suffix = "s")),
+      RH.maximum_delay = colDef(
+        name = "Maximum delay duration (seconds)",
+        na = "-", 
+        format = colFormat(suffix = "s"))
+    ),
+    columnGroups = list(
+      colGroup(name = "Non-Rush Hour", columns = c("NRH.percentage_of_delay", "NRH.average_delay", "NRH.maximum_delay")),
+      colGroup(name = "Rush Hour", columns = c("RH.percentage_of_delay", "RH.average_delay", "RH.maximum_delay"))
+    ),
+    theme = reactableTheme(
+      style = list(fontFamily = "News Cycle")
+    ))
+
+busStop_table
+```
